@@ -30,6 +30,14 @@ const auth = (req, res, next) =>
 
 app.get("/health", (_, res) => res.json({ ok: true }));
 
+// latest app version, edited from Render environment variables
+app.get("/version", auth, (_, res) => res.json({
+    versionCode: Number(process.env.APP_VERSION_CODE || 2),
+    versionName: process.env.APP_VERSION_NAME || "1.1",
+    apkUrl: process.env.APP_APK_URL || "",
+    notes: process.env.APP_NOTES || ""
+}));
+
 app.post("/sync", auth, async(req, res) => {
     console.log("🔥 SYNC REQUEST RECEIVED FROM PHONE!", req.body);
     const { deviceId, accounts = [], tx = [] } = req.body;
