@@ -31,6 +31,7 @@ const auth = (req, res, next) =>
 app.get("/health", (_, res) => res.json({ ok: true }));
 
 app.post("/sync", auth, async(req, res) => {
+    console.log("🔥 SYNC REQUEST RECEIVED FROM PHONE!", req.body);
     const { deviceId, accounts = [], tx = [] } = req.body;
     if (!deviceId) return res.status(400).json({ error: "deviceId required" });
     const c = await pool.connect();
@@ -51,6 +52,25 @@ app.post("/sync", auth, async(req, res) => {
          ON CONFLICT (device_id,id) DO UPDATE SET category=EXCLUDED.category, note=EXCLUDED.note`, [deviceId, t.id, t.bank, t.amount, t.income, t.category, t.note, t.ts]
             );
         }
+        await c.query("COMMIT");
+        res.json({ ok: true });
+    } catch (e) {
+        await c.query("ROLLBACK");
+        console.error(e);
+        res.status(500).json({ error: "db error" });
+    } finally {
+        c.release();
+    }
+});
+
+// delete one account and all its transactions
+app.delete("/account/:deviceId/:bank", auth, async(req, res) => {
+    const { deviceId, bank } = req.params;
+    const c = await pool.connect();
+    try {
+        await c.query("BEGIN");
+        await c.query("DELETE FROM transactions WHERE device_id=$1 AND bank=$2", [deviceId, bank]);
+        await c.query("DELETE FROM accounts WHERE device_id=$1 AND bank=$2", [deviceId, bank]);
         await c.query("COMMIT");
         res.json({ ok: true });
     } catch (e) {
