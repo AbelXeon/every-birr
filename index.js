@@ -105,10 +105,8 @@ let sentToday = 0;
 
 function countEmail() {
     const k = new Date().toISOString().slice(0, 10);
-    if (k !== dayKey) {
-        dayKey = k;
-        sentToday = 0;
-    }
+    if (k !== dayKey) { dayKey = k;
+        sentToday = 0; }
     if (sentToday >= 250) return false; // Brevo free plan is 300 a day
     sentToday++;
     return true;
@@ -196,7 +194,7 @@ function readTicket(t, purpose) {
         const p = jwt.verify(String(t || ""), JWT_SECRET, { algorithms: ["HS256"] });
         if (p.typ !== "ticket" || p.purpose !== purpose) throw new Error("wrong ticket");
         return p.email;
-    } catch {
+    } catch (e) {
         throw httpError(400, "ticket_invalid");
     }
 }
@@ -211,7 +209,7 @@ async function requireUser(req, res, next) {
         if (!rows[0] || rows[0].token_version !== p.v) return res.status(401).json({ error: "session_expired" });
         req.user = rows[0];
         next();
-    } catch {
+    } catch (e) {
         res.status(401).json({ error: "unauthorized" });
     }
 }
@@ -221,11 +219,11 @@ async function requireUser(req, res, next) {
 const DUMMY_HASH = bcrypt.hashSync("000000", 10);
 
 async function checkPin(user, pin, badCode = "bad_credentials") {
-    if (user ? .locked_until && new Date(user.locked_until) > new Date()) {
+    if (user && user.locked_until && new Date(user.locked_until) > new Date()) {
         throw httpError(429, "locked", { retryAfter: Math.ceil((new Date(user.locked_until) - Date.now()) / 1000) });
     }
     const p = typeof pin === "string" ? pin : "";
-    const match = await bcrypt.compare(p, user ? .pin_hash ? ? DUMMY_HASH); // always runs, same timing
+    const match = await bcrypt.compare(p, user ? user.pin_hash : DUMMY_HASH); // always runs, same timing
     if (!user) throw httpError(401, badCode);
     if (match && PIN_RX.test(p)) {
         if (user.failed_attempts) {
@@ -411,16 +409,14 @@ app.post("/v2/sync", requireUser, wrap(async(req, res) => {
             // an account created again after being deleted clears its "deleted" mark
             await c.query("DELETE FROM user_deleted_accounts WHERE user_id=$1 AND bank=$2 AND deleted_at < $3", [uid, a.bank, a.updated]);
         }
-        const dead = new Map(
-            (await c.query("SELECT bank, deleted_at FROM user_deleted_accounts WHERE user_id=$1", [uid]))
-            .rows.map((r) => [r.bank, Number(r.deleted_at)])
-        );
+        const deadRows = (await c.query("SELECT bank, deleted_at FROM user_deleted_accounts WHERE user_id=$1", [uid])).rows;
+        const dead = new Map(deadRows.map((r) => [r.bank, Number(r.deleted_at)]));
         for (const t of tx) {
             if (dead.has(t.bank) && dead.get(t.bank) >= Number(t.ts)) continue; // belongs to a deleted account
             await c.query(
                 `INSERT INTO user_transactions(user_id,id,bank,amount,income,category,note,ts)
                  VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-                 ON CONFLICT (user_id,id) DO UPDATE SET category=EXCLUDED.category, note=EXCLUDED.note`, [uid, t.id, t.bank, t.amount, !!t.income, t.category ? ? null, t.note ? ? "", t.ts]
+                 ON CONFLICT (user_id,id) DO UPDATE SET category=EXCLUDED.category, note=EXCLUDED.note`, [uid, t.id, t.bank, t.amount, !!t.income, t.category || null, t.note || "", t.ts]
             );
         }
         await c.query("COMMIT");
@@ -448,7 +444,7 @@ app.get("/v2/pull", requireUser, wrap(async(req, res) => {
             amount: Number(r.amount),
             income: r.income,
             category: r.category,
-            note: r.note ? ? "",
+            note: r.note || "",
             ts: Number(r.ts),
         })),
         deletedAccounts: d.rows.map((r) => ({ bank: r.bank, deletedAt: Number(r.deleted_at) })),
@@ -541,7 +537,7 @@ app.get("/data/:deviceId", legacyAuth, wrap(async(req, res) => {
 // ---------------------------------------------------------------- errors
 
 app.use((err, req, res, next) => {
-    if (err.status) return res.status(err.status).json({ error: err.code, ...(err.extra || {}) });
+    if (err.status) return res.status(err.status).json(Object.assign({ error: err.code }, err.extra || {}));
     console.error(err);
     res.status(500).json({ error: "server_error" });
 });
